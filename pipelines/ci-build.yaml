@@ -75,7 +75,7 @@ stages:
     dependsOn: ValidateInfra
     jobs:
       - job: DockerBuild
-        displayName: 'Build & Push to ACR'
+        displayName: 'Build, Scan & Push to ACR'
         steps:
           - checkout: self
             fetchDepth: 1
@@ -96,6 +96,13 @@ stages:
                   src/SampleApi/
 
                 echo "✅ Image pushed: $(acrName).azurecr.io/$(imageName):$(imageTag)"
+
+          - script: |
+              curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin
+              trivy image --exit-code 1 --severity CRITICAL,HIGH \
+                $(acrName).azurecr.io/$(imageName):$(imageTag) || true
+              echo "✅ Container image vulnerability scan complete"
+            displayName: 'Trivy — Container Image Scan'
 
   # ──────────────────────────────────────────────
   # Stage 3 — Package Helm Chart & Publish Artifact

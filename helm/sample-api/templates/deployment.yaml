@@ -18,10 +18,18 @@ spec:
         app: {{ .Chart.Name }}
         version: {{ .Values.image.tag | quote }}
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
           ports:
             - containerPort: {{ .Values.service.targetPort }}
               protocol: TCP

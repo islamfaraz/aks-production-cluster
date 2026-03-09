@@ -31,7 +31,6 @@ module networking 'modules/networking.bicep' = {
     namePrefix: namePrefix
     uniqueSuffix: uniqueSuffix
     location: location
-    environment: environment
     tags: tags
   }
 }

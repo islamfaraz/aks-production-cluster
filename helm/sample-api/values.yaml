@@ -20,6 +20,10 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
+  tls:
+    - secretName: sample-api-tls
+      hosts:
+        - sample-api.example.com
 
 resources:
   requests:

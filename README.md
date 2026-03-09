@@ -169,8 +169,8 @@ aks-production-cluster/
 | Resource | Module | Dev SKU | Prod SKU |
 |---|---|---|---|
 | **VNet** | `networking.bicep` | 10.0.0.0/16 | 10.0.0.0/16 |
-| **AKS Cluster** | `aks.bicep` | Standard_B4ms, 1-3 nodes | Standard_D4s_v5, 3-10 nodes |
-| **System Pool** | `aks.bicep` | Standard_B2s, 1-3 nodes | Standard_D2s_v5, 2-5 nodes |
+| **AKS Cluster** | `aks.bicep` | Standard_B2ms, 1-3 nodes | Standard_D4s_v5, 3-10 nodes |
+| **System Pool** | `aks.bicep` | Standard_B2ms, 1-3 nodes | Standard_D4s_v5, 3-10 nodes |
 | **ACR** | `acr.bicep` | Basic | Premium (zone-redundant) |
 | **Log Analytics** | `monitoring.bicep` | PerGB2018, 30d | PerGB2018, 90d |
 
