@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Chart.Name }}
+  labels:
+    app: {{ .Chart.Name }}
+    version: {{ .Values.image.tag | quote }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ .Chart.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Chart.Name }}
+        version: {{ .Values.image.tag | quote }}
+    spec:
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          env:
+            - name: APP_VERSION
+              value: {{ .Values.env.APP_VERSION | quote }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: {{ .Values.probes.liveness.port }}
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: {{ .Values.probes.readiness.port }}
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
+          resources:
+            requests:
+              cpu: {{ .Values.resources.requests.cpu }}
+              memory: {{ .Values.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+              memory: {{ .Values.resources.limits.memory }}
+      {{- if .Values.topologySpreadConstraints.enabled }}
+      topologySpreadConstraints:
+        - maxSkew: {{ .Values.topologySpreadConstraints.maxSkew }}
+          topologyKey: {{ .Values.topologySpreadConstraints.topologyKey }}
+          whenUnsatisfiable: {{ .Values.topologySpreadConstraints.whenUnsatisfiable }}
+          labelSelector:
+            matchLabels:
+              app: {{ .Chart.Name }}
+      {{- end }}

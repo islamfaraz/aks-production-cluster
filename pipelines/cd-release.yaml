@@ -1,0 +1,195 @@
+# =============================================================================
+# CD Release Pipeline — AKS Production Cluster
+# 1. Deploy Bicep infra (AKS + ACR + VNet)
+# 2. Deploy Helm chart to AKS cluster
+# =============================================================================
+
+trigger: none
+
+resources:
+  pipelines:
+    - pipeline: ciBuild
+      source: 'aks-cluster-ci'
+      trigger:
+        branches:
+          include:
+            - main
+
+variables:
+  - name: azureServiceConnection
+    value: 'AzureServiceConnection'
+  - name: acrName
+    value: 'acraksclusterprod'
+  - name: imageName
+    value: 'sample-api'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+  # ──────────────────────────────────────────────
+  # Stage 1 — Deploy AKS Infra (DEV)
+  # ──────────────────────────────────────────────
+  - stage: DeployInfraDev
+    displayName: '🏗️ Deploy AKS Infra — DEV'
+    jobs:
+      - deployment: BicepDeploy
+        displayName: 'Bicep Deploy — DEV'
+        environment: 'aks-dev'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: AzureCLI@2
+                  displayName: 'Deploy AKS Infra — DEV'
+                  inputs:
+                    azureSubscription: $(azureServiceConnection)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      az group create --name rg-akscluster-dev --location eastus2
+
+                      az deployment group create \
+                        --name "aks-dev-$(resources.pipeline.ciBuild.runName)" \
+                        --resource-group rg-akscluster-dev \
+                        --template-file infra/main.bicep \
+                        --parameters infra/parameters/dev.bicepparam
+
+                      echo "✅ AKS DEV infrastructure deployed"
+
+  # ──────────────────────────────────────────────
+  # Stage 2 — Deploy Helm Chart to AKS (DEV)
+  # ──────────────────────────────────────────────
+  - stage: DeployAppDev
+    displayName: '🚀 Deploy App to AKS — DEV'
+    dependsOn: DeployInfraDev
+    jobs:
+      - deployment: HelmDeploy
+        displayName: 'Helm Deploy — DEV'
+        environment: 'aks-dev'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - download: ciBuild
+                  displayName: 'Download Helm Artifact'
+
+                - task: HelmInstaller@0
+                  inputs:
+                    helmVersion: '3.14.0'
+
+                - task: AzureCLI@2
+                  displayName: 'Get AKS Credentials & Deploy Helm'
+                  inputs:
+                    azureSubscription: $(azureServiceConnection)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      IMAGE_TAG=$(resources.pipeline.ciBuild.runID)
+
+                      # Get AKS cluster name from deployment outputs
+                      AKS_NAME=$(az deployment group show \
+                        --name "aks-dev-$(resources.pipeline.ciBuild.runName)" \
+                        --resource-group rg-akscluster-dev \
+                        --query "properties.outputs.aksClusterName.value" -o tsv)
+
+                      ACR_SERVER=$(az deployment group show \
+                        --name "aks-dev-$(resources.pipeline.ciBuild.runName)" \
+                        --resource-group rg-akscluster-dev \
+                        --query "properties.outputs.acrLoginServer.value" -o tsv)
+
+                      echo "📡 Getting AKS credentials..."
+                      az aks get-credentials \
+                        --resource-group rg-akscluster-dev \
+                        --name "$AKS_NAME" \
+                        --overwrite-existing
+
+                      echo "🚀 Deploying with Helm..."
+                      CHART=$(find $(Pipeline.Workspace)/ciBuild/ -name "sample-api-*.tgz" | head -1)
+
+                      helm upgrade --install sample-api "$CHART" \
+                        --namespace default \
+                        --set image.repository="$ACR_SERVER/$(imageName)" \
+                        --set image.tag="$IMAGE_TAG" \
+                        --set env.APP_VERSION="$IMAGE_TAG" \
+                        --wait \
+                        --timeout 5m
+
+                      echo "✅ App deployed to AKS DEV"
+                      kubectl get pods -l app=sample-api
+                      kubectl get svc sample-api
+
+  # ──────────────────────────────────────────────
+  # Stage 3 — Deploy to PRODUCTION (Manual Gate)
+  # ──────────────────────────────────────────────
+  - stage: DeployProd
+    displayName: '🟢 Deploy to PRODUCTION'
+    dependsOn: DeployAppDev
+    jobs:
+      - deployment: ProdDeploy
+        displayName: 'Infra + App — PROD'
+        environment: 'aks-prod'    # Manual approval configured here
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                - download: ciBuild
+
+                - task: HelmInstaller@0
+                  inputs:
+                    helmVersion: '3.14.0'
+
+                - task: AzureCLI@2
+                  displayName: 'Deploy Infra + App — PROD'
+                  inputs:
+                    azureSubscription: $(azureServiceConnection)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      IMAGE_TAG=$(resources.pipeline.ciBuild.runID)
+
+                      # Deploy infra
+                      az group create --name rg-akscluster-prod --location eastus2
+                      az deployment group create \
+                        --name "aks-prod-$(resources.pipeline.ciBuild.runName)" \
+                        --resource-group rg-akscluster-prod \
+                        --template-file infra/main.bicep \
+                        --parameters infra/parameters/prod.bicepparam
+
+                      # Get outputs
+                      AKS_NAME=$(az deployment group show \
+                        --name "aks-prod-$(resources.pipeline.ciBuild.runName)" \
+                        --resource-group rg-akscluster-prod \
+                        --query "properties.outputs.aksClusterName.value" -o tsv)
+
+                      ACR_SERVER=$(az deployment group show \
+                        --name "aks-prod-$(resources.pipeline.ciBuild.runName)" \
+                        --resource-group rg-akscluster-prod \
+                        --query "properties.outputs.acrLoginServer.value" -o tsv)
+
+                      az aks get-credentials \
+                        --resource-group rg-akscluster-prod \
+                        --name "$AKS_NAME" \
+                        --overwrite-existing
+
+                      CHART=$(find $(Pipeline.Workspace)/ciBuild/ -name "sample-api-*.tgz" | head -1)
+
+                      helm upgrade --install sample-api "$CHART" \
+                        --namespace default \
+                        --set image.repository="$ACR_SERVER/$(imageName)" \
+                        --set image.tag="$IMAGE_TAG" \
+                        --set replicaCount=3 \
+                        --set autoscaling.enabled=true \
+                        --set autoscaling.minReplicas=3 \
+                        --set autoscaling.maxReplicas=20 \
+                        --set podDisruptionBudget.enabled=true \
+                        --set topologySpreadConstraints.enabled=true \
+                        --wait \
+                        --timeout 10m
+
+                      echo "✅ PRODUCTION deployment complete"
+                      kubectl get pods -l app=sample-api -o wide
+                      kubectl get hpa sample-api

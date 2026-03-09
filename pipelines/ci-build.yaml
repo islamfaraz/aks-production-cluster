@@ -1,0 +1,145 @@
+# =============================================================================
+# CI Pipeline — AKS Production Cluster
+# 1. Validates Bicep (infra)
+# 2. Builds Docker image → pushes to ACR
+# 3. Packages Helm chart → publishes artifact
+# =============================================================================
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - infra/**
+      - src/**
+      - helm/**
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  - name: azureServiceConnection
+    value: 'AzureServiceConnection'
+  - name: acrName
+    value: 'acraksclusterprod'  # Replace with actual ACR name
+  - name: imageName
+    value: 'sample-api'
+  - name: imageTag
+    value: '$(Build.BuildId)'
+  - name: buildVersion
+    value: '$(Build.BuildNumber)'
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+stages:
+  # ──────────────────────────────────────────────
+  # Stage 1 — Validate Bicep Infrastructure
+  # ──────────────────────────────────────────────
+  - stage: ValidateInfra
+    displayName: '🔍 Validate Bicep'
+    jobs:
+      - job: Validate
+        steps:
+          - checkout: self
+            fetchDepth: 1
+
+          - task: AzureCLI@2
+            displayName: 'Lint & Validate Bicep'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                az bicep install
+                find infra -name '*.bicep' | while read f; do
+                  echo "Linting: $f"
+                  az bicep lint --file "$f" || exit 1
+                done
+
+                az deployment group validate \
+                  --resource-group rg-akscluster-dev \
+                  --template-file infra/main.bicep \
+                  --parameters infra/parameters/dev.bicepparam
+
+                echo "✅ Bicep validated"
+
+  # ──────────────────────────────────────────────
+  # Stage 2 — Build Docker Image → Push to ACR
+  # ──────────────────────────────────────────────
+  - stage: BuildImage
+    displayName: '🐳 Build & Push Docker Image'
+    dependsOn: ValidateInfra
+    jobs:
+      - job: DockerBuild
+        displayName: 'Build & Push to ACR'
+        steps:
+          - checkout: self
+            fetchDepth: 1
+
+          - task: AzureCLI@2
+            displayName: 'Build & Push Docker Image to ACR'
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              inlineScript: |
+                echo "🐳 Building Docker image..."
+                az acr build \
+                  --registry $(acrName) \
+                  --image $(imageName):$(imageTag) \
+                  --image $(imageName):latest \
+                  --file src/SampleApi/Dockerfile \
+                  src/SampleApi/
+
+                echo "✅ Image pushed: $(acrName).azurecr.io/$(imageName):$(imageTag)"
+
+  # ──────────────────────────────────────────────
+  # Stage 3 — Package Helm Chart & Publish Artifact
+  # ──────────────────────────────────────────────
+  - stage: PackageHelm
+    displayName: '📦 Package Helm Chart'
+    dependsOn: BuildImage
+    jobs:
+      - job: HelmPackage
+        steps:
+          - checkout: self
+            fetchDepth: 1
+
+          - task: HelmInstaller@0
+            displayName: 'Install Helm'
+            inputs:
+              helmVersion: '3.14.0'
+
+          - script: |
+              helm lint helm/sample-api/
+              echo "✅ Helm chart lint passed"
+            displayName: 'Lint Helm Chart'
+
+          - script: |
+              helm package helm/sample-api/ \
+                --version $(buildVersion) \
+                --app-version $(imageTag) \
+                --destination $(Build.ArtifactStagingDirectory)
+
+              cat > $(Build.ArtifactStagingDirectory)/manifest.json << EOF
+              {
+                "project": "aks-production-cluster",
+                "version": "$(buildVersion)",
+                "imageTag": "$(imageTag)",
+                "acrImage": "$(acrName).azurecr.io/$(imageName):$(imageTag)",
+                "buildId": "$(Build.BuildId)",
+                "sourceCommit": "$(Build.SourceVersion)"
+              }
+              EOF
+              echo "✅ Helm chart packaged"
+            displayName: 'Package Helm Chart'
+
+          - task: PublishPipelineArtifact@1
+            displayName: 'Publish Artifacts'
+            inputs:
+              targetPath: $(Build.ArtifactStagingDirectory)
+              artifactName: 'helm-$(buildVersion)'
