@@ -1,0 +1,140 @@
+# =============================================================================
+# GitHub Actions CI — AKS Production Cluster (Bicep + Docker + Helm)
+# Validates Bicep, builds Docker image, lints Helm charts, security scans
+# =============================================================================
+
+name: CI — Build & Validate AKS Platform
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "infra/**"
+      - "helm/**"
+      - "src/**"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "infra/**"
+      - "helm/**"
+      - "src/**"
+
+permissions:
+  contents: read
+  id-token: write
+  security-events: write
+
+env:
+  ACR_NAME: acraksprod
+  IMAGE_NAME: sample-api
+
+jobs:
+  # ────────────────────────────────────────────
+  # Job 1 — Validate Bicep Infrastructure
+  # ────────────────────────────────────────────
+  validate-infra:
+    name: 🔍 Validate Bicep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bicep Lint
+        run: az bicep lint --file infra/main.bicep
+
+      - name: Compile Bicep to ARM
+        run: az bicep build --file infra/main.bicep --outdir artifact/arm
+
+      - name: Run Checkov — Bicep
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: infra
+          framework: bicep
+          soft_fail: true
+
+      - name: Upload ARM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bicep-arm-${{ github.run_number }}
+          path: artifact/arm/
+          retention-days: 5
+
+  # ────────────────────────────────────────────
+  # Job 2 — Build & Scan Docker Image
+  # ────────────────────────────────────────────
+  build-docker:
+    name: 🐳 Build & Scan Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker Image
+        uses: docker/build-push-action@v6
+        with:
+          context: src/SampleApi
+          file: src/SampleApi/Dockerfile
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+      - name: Trivy Vulnerability Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          format: table
+          exit-code: 0
+          severity: CRITICAL,HIGH
+
+  # ────────────────────────────────────────────
+  # Job 3 — Lint & Package Helm Chart
+  # ────────────────────────────────────────────
+  validate-helm:
+    name: ⎈ Lint & Package Helm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.15.0
+
+      - name: Helm Lint
+        run: helm lint helm/sample-api
+
+      - name: Helm Template (dry-run)
+        run: |
+          helm template sample-api helm/sample-api \
+            --set image.tag=${{ github.sha }} \
+            --debug
+
+      - name: Helm Package
+        run: |
+          helm package helm/sample-api \
+            --version 0.1.0-${{ github.run_number }} \
+            --app-version ${{ github.sha }} \
+            --destination artifact/helm/
+
+      - name: Upload Helm Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-chart-${{ github.run_number }}
+          path: artifact/helm/
+          retention-days: 5
+
+  # ────────────────────────────────────────────
+  # Job 4 — Security Scan
+  # ────────────────────────────────────────────
+  security-scan:
+    name: 🛡️ Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect Secrets
+        uses: reviewdog/action-detect-secrets@v0.17
+        with:
+          fail_on_error: true

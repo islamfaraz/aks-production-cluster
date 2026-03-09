@@ -1,0 +1,634 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.39.26.7824",
+      "templateHash": "4048658902360690158"
+    }
+  },
+  "parameters": {
+    "environment": {
+      "type": "string",
+      "allowedValues": [
+        "dev",
+        "staging",
+        "prod"
+      ],
+      "metadata": {
+        "description": "Deployment environment"
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region"
+      }
+    },
+    "projectName": {
+      "type": "string",
+      "defaultValue": "akscluster",
+      "metadata": {
+        "description": "Project name for resource naming"
+      }
+    },
+    "kubernetesVersion": {
+      "type": "string",
+      "defaultValue": "1.29",
+      "metadata": {
+        "description": "AKS Kubernetes version"
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {},
+      "metadata": {
+        "description": "Tags for all resources"
+      }
+    }
+  },
+  "variables": {
+    "uniqueSuffix": "[substring(uniqueString(resourceGroup().id, parameters('projectName')), 0, 6)]",
+    "namePrefix": "[format('{0}-{1}', parameters('projectName'), parameters('environment'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('networking-{0}', variables('uniqueSuffix'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "namePrefix": {
+            "value": "[variables('namePrefix')]"
+          },
+          "uniqueSuffix": {
+            "value": "[variables('uniqueSuffix')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.39.26.7824",
+              "templateHash": "8474576615596642793"
+            }
+          },
+          "parameters": {
+            "namePrefix": {
+              "type": "string"
+            },
+            "uniqueSuffix": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Network/networkSecurityGroups",
+              "apiVersion": "2023-09-01",
+              "name": "[format('nsg-aks-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "securityRules": [
+                  {
+                    "name": "AllowHTTPS",
+                    "properties": {
+                      "priority": 100,
+                      "direction": "Inbound",
+                      "access": "Allow",
+                      "protocol": "Tcp",
+                      "sourceAddressPrefix": "*",
+                      "sourcePortRange": "*",
+                      "destinationAddressPrefix": "*",
+                      "destinationPortRange": "443"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.Network/networkSecurityGroups",
+              "apiVersion": "2023-09-01",
+              "name": "[format('nsg-appgw-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "securityRules": [
+                  {
+                    "name": "AllowGatewayManager",
+                    "properties": {
+                      "priority": 100,
+                      "direction": "Inbound",
+                      "access": "Allow",
+                      "protocol": "Tcp",
+                      "sourceAddressPrefix": "GatewayManager",
+                      "sourcePortRange": "*",
+                      "destinationAddressPrefix": "*",
+                      "destinationPortRange": "65200-65535"
+                    }
+                  },
+                  {
+                    "name": "AllowHTTPS",
+                    "properties": {
+                      "priority": 110,
+                      "direction": "Inbound",
+                      "access": "Allow",
+                      "protocol": "Tcp",
+                      "sourceAddressPrefix": "*",
+                      "sourcePortRange": "*",
+                      "destinationAddressPrefix": "*",
+                      "destinationPortRange": "443"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "Microsoft.Network/virtualNetworks",
+              "apiVersion": "2023-09-01",
+              "name": "[format('vnet-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "addressSpace": {
+                  "addressPrefixes": [
+                    "10.0.0.0/16"
+                  ]
+                },
+                "subnets": [
+                  {
+                    "name": "snet-aks",
+                    "properties": {
+                      "addressPrefix": "10.0.0.0/20",
+                      "privateEndpointNetworkPolicies": "Disabled",
+                      "networkSecurityGroup": {
+                        "id": "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-aks-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix')))]"
+                      }
+                    }
+                  },
+                  {
+                    "name": "snet-appgw",
+                    "properties": {
+                      "addressPrefix": "10.0.16.0/24",
+                      "networkSecurityGroup": {
+                        "id": "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-appgw-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix')))]"
+                      }
+                    }
+                  },
+                  {
+                    "name": "snet-internal",
+                    "properties": {
+                      "addressPrefix": "10.0.17.0/24"
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-aks-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix')))]",
+                "[resourceId('Microsoft.Network/networkSecurityGroups', format('nsg-appgw-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix')))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "vnetId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Network/virtualNetworks', format('vnet-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix')))]"
+            },
+            "aksSubnetId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/virtualNetworks', format('vnet-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix'))), '2023-09-01').subnets[0].id]"
+            },
+            "appGwSubnetId": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Network/virtualNetworks', format('vnet-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix'))), '2023-09-01').subnets[1].id]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('acr-{0}', variables('uniqueSuffix'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "namePrefix": {
+            "value": "[variables('namePrefix')]"
+          },
+          "uniqueSuffix": {
+            "value": "[variables('uniqueSuffix')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "environment": {
+            "value": "[parameters('environment')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.39.26.7824",
+              "templateHash": "7855757982933230348"
+            }
+          },
+          "parameters": {
+            "namePrefix": {
+              "type": "string"
+            },
+            "uniqueSuffix": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "environment": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object"
+            }
+          },
+          "variables": {
+            "acrName": "[replace(format('acr{0}{1}', parameters('namePrefix'), parameters('uniqueSuffix')), '-', '')]"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ContainerRegistry/registries",
+              "apiVersion": "2023-07-01",
+              "name": "[variables('acrName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "[if(equals(parameters('environment'), 'prod'), 'Premium', 'Basic')]"
+              },
+              "properties": {
+                "adminUserEnabled": false,
+                "publicNetworkAccess": "Enabled",
+                "zoneRedundancy": "[if(equals(parameters('environment'), 'prod'), 'Enabled', 'Disabled')]",
+                "policies": {
+                  "retentionPolicy": {
+                    "status": "[if(equals(parameters('environment'), 'prod'), 'enabled', 'disabled')]",
+                    "days": 30
+                  }
+                }
+              }
+            }
+          ],
+          "outputs": {
+            "acrId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.ContainerRegistry/registries', variables('acrName'))]"
+            },
+            "acrName": {
+              "type": "string",
+              "value": "[variables('acrName')]"
+            },
+            "loginServer": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ContainerRegistry/registries', variables('acrName')), '2023-07-01').loginServer]"
+            }
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('aks-{0}', variables('uniqueSuffix'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "namePrefix": {
+            "value": "[variables('namePrefix')]"
+          },
+          "uniqueSuffix": {
+            "value": "[variables('uniqueSuffix')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "environment": {
+            "value": "[parameters('environment')]"
+          },
+          "kubernetesVersion": {
+            "value": "[parameters('kubernetesVersion')]"
+          },
+          "vnetSubnetId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('networking-{0}', variables('uniqueSuffix'))), '2025-04-01').outputs.aksSubnetId.value]"
+          },
+          "acrId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('acr-{0}', variables('uniqueSuffix'))), '2025-04-01').outputs.acrId.value]"
+          },
+          "logAnalyticsWorkspaceId": {
+            "value": "[reference(resourceId('Microsoft.Resources/deployments', format('monitoring-{0}', variables('uniqueSuffix'))), '2025-04-01').outputs.workspaceId.value]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.39.26.7824",
+              "templateHash": "7426574447073212079"
+            }
+          },
+          "parameters": {
+            "namePrefix": {
+              "type": "string"
+            },
+            "uniqueSuffix": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "environment": {
+              "type": "string"
+            },
+            "kubernetesVersion": {
+              "type": "string"
+            },
+            "vnetSubnetId": {
+              "type": "string"
+            },
+            "acrId": {
+              "type": "string"
+            },
+            "logAnalyticsWorkspaceId": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.ContainerService/managedClusters",
+              "apiVersion": "2024-01-01",
+              "name": "[format('aks-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
+              "sku": {
+                "name": "Base",
+                "tier": "[if(equals(parameters('environment'), 'prod'), 'Standard', 'Free')]"
+              },
+              "properties": {
+                "kubernetesVersion": "[parameters('kubernetesVersion')]",
+                "dnsPrefix": "[format('aks-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix'))]",
+                "enableRBAC": true,
+                "agentPoolProfiles": [
+                  {
+                    "name": "system",
+                    "count": "[if(equals(parameters('environment'), 'prod'), 3, 1)]",
+                    "vmSize": "[if(equals(parameters('environment'), 'prod'), 'Standard_D4s_v5', 'Standard_B2ms')]",
+                    "osType": "Linux",
+                    "osSKU": "AzureLinux",
+                    "mode": "System",
+                    "vnetSubnetID": "[parameters('vnetSubnetId')]",
+                    "maxPods": 110,
+                    "enableAutoScaling": true,
+                    "minCount": "[if(equals(parameters('environment'), 'prod'), 3, 1)]",
+                    "maxCount": "[if(equals(parameters('environment'), 'prod'), 10, 3)]",
+                    "availabilityZones": "[if(equals(parameters('environment'), 'prod'), createArray('1', '2', '3'), null())]",
+                    "nodeTaints": [
+                      "CriticalAddonsOnly=true:NoSchedule"
+                    ],
+                    "upgradeSettings": {
+                      "maxSurge": "33%"
+                    }
+                  }
+                ],
+                "networkProfile": {
+                  "networkPlugin": "azure",
+                  "networkPolicy": "calico",
+                  "serviceCidr": "172.16.0.0/16",
+                  "dnsServiceIP": "172.16.0.10",
+                  "loadBalancerSku": "standard",
+                  "outboundType": "loadBalancer"
+                },
+                "autoUpgradeProfile": {
+                  "upgradeChannel": "[if(equals(parameters('environment'), 'prod'), 'stable', 'rapid')]"
+                },
+                "addonProfiles": {
+                  "omsagent": {
+                    "enabled": true,
+                    "config": {
+                      "logAnalyticsWorkspaceResourceID": "[parameters('logAnalyticsWorkspaceId')]"
+                    }
+                  },
+                  "azurePolicy": {
+                    "enabled": true
+                  }
+                },
+                "apiServerAccessProfile": {
+                  "enablePrivateCluster": "[equals(parameters('environment'), 'prod')]"
+                },
+                "autoScalerProfile": {
+                  "balance-similar-node-groups": "true",
+                  "expander": "random",
+                  "max-graceful-termination-sec": "600",
+                  "scale-down-delay-after-add": "10m",
+                  "scale-down-unneeded-time": "10m",
+                  "scan-interval": "10s"
+                }
+              }
+            },
+            {
+              "type": "Microsoft.ContainerService/managedClusters/agentPools",
+              "apiVersion": "2024-01-01",
+              "name": "[format('{0}/{1}', format('aks-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix')), 'workload')]",
+              "properties": {
+                "count": "[if(equals(parameters('environment'), 'prod'), 3, 1)]",
+                "vmSize": "[if(equals(parameters('environment'), 'prod'), 'Standard_D8s_v5', 'Standard_B4ms')]",
+                "osType": "Linux",
+                "osSKU": "AzureLinux",
+                "mode": "User",
+                "vnetSubnetID": "[parameters('vnetSubnetId')]",
+                "maxPods": 110,
+                "enableAutoScaling": true,
+                "minCount": "[if(equals(parameters('environment'), 'prod'), 3, 1)]",
+                "maxCount": "[if(equals(parameters('environment'), 'prod'), 50, 5)]",
+                "availabilityZones": "[if(equals(parameters('environment'), 'prod'), createArray('1', '2', '3'), null())]",
+                "upgradeSettings": {
+                  "maxSurge": "33%"
+                },
+                "nodeLabels": {
+                  "workload-type": "general"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ContainerService/managedClusters', format('aks-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix')))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(resourceId('Microsoft.ContainerService/managedClusters', format('aks-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix'))), parameters('acrId'), 'acrpull')]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '7f951dda-4ed3-4680-a7ca-43fe172d538d')]",
+                "principalId": "[reference(resourceId('Microsoft.ContainerService/managedClusters', format('aks-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix'))), '2024-01-01').identityProfile.kubeletidentity.objectId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ContainerService/managedClusters', format('aks-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix')))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "clusterName": {
+              "type": "string",
+              "value": "[format('aks-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix'))]"
+            },
+            "clusterFqdn": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ContainerService/managedClusters', format('aks-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix'))), '2024-01-01').fqdn]"
+            },
+            "kubeletIdentity": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.ContainerService/managedClusters', format('aks-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix'))), '2024-01-01').identityProfile.kubeletidentity.objectId]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Resources/deployments', format('acr-{0}', variables('uniqueSuffix')))]",
+        "[resourceId('Microsoft.Resources/deployments', format('monitoring-{0}', variables('uniqueSuffix')))]",
+        "[resourceId('Microsoft.Resources/deployments', format('networking-{0}', variables('uniqueSuffix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('monitoring-{0}', variables('uniqueSuffix'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "namePrefix": {
+            "value": "[variables('namePrefix')]"
+          },
+          "uniqueSuffix": {
+            "value": "[variables('uniqueSuffix')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.39.26.7824",
+              "templateHash": "9295381908009239378"
+            }
+          },
+          "parameters": {
+            "namePrefix": {
+              "type": "string"
+            },
+            "uniqueSuffix": {
+              "type": "string"
+            },
+            "location": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "object"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.OperationalInsights/workspaces",
+              "apiVersion": "2022-10-01",
+              "name": "[format('log-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix'))]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "sku": {
+                  "name": "PerGB2018"
+                },
+                "retentionInDays": 90
+              }
+            }
+          ],
+          "outputs": {
+            "workspaceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.OperationalInsights/workspaces', format('log-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix')))]"
+            },
+            "workspaceName": {
+              "type": "string",
+              "value": "[format('log-{0}-{1}', parameters('namePrefix'), parameters('uniqueSuffix'))]"
+            }
+          }
+        }
+      }
+    }
+  ],
+  "outputs": {
+    "aksClusterName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('aks-{0}', variables('uniqueSuffix'))), '2025-04-01').outputs.clusterName.value]"
+    },
+    "aksClusterFqdn": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('aks-{0}', variables('uniqueSuffix'))), '2025-04-01').outputs.clusterFqdn.value]"
+    },
+    "acrLoginServer": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('acr-{0}', variables('uniqueSuffix'))), '2025-04-01').outputs.loginServer.value]"
+    },
+    "acrName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Resources/deployments', format('acr-{0}', variables('uniqueSuffix'))), '2025-04-01').outputs.acrName.value]"
+    }
+  }
+}
